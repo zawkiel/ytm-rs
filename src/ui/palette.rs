@@ -92,11 +92,12 @@ struct Entry {
 /// Settings' categories and sections, by their titles. One named as its category opens
 /// that; any other is looked for with Settings' own search.
 /// As Settings titles them, in this run's language: a search for one finds it there.
-fn sections() -> [(&'static str, SettingsTab); 22] {
+fn sections() -> [(&'static str, SettingsTab); 23] {
     use SettingsTab::*;
     [
         (tr!("settings-account"), Account),
         (tr!("settings-connections"), Connections),
+        (Discord.label(), Discord),
         (tr!("settings-playback"), Playback),
         (tr!("settings-sound"), Playback),
         (tr!("settings-music-videos"), Playback),
