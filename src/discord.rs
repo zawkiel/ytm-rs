@@ -1,29 +1,20 @@
 //! Discord Rich Presence: "Listening to <song>" with cover art and a progress bar, laid
 //! out as the listener sets it in Settings › Connections.
 //!
-//! A worker thread owns the IPC pipe so a missing or restarting Discord never blocks the
-//! UI. The UI sends the wanted state whenever it changes; the worker coalesces bursts
-//! (Discord rate-limits activity updates) and reconnects every 15 s while Discord is
-//! closed.
+//! Local RPC is run asynchronously by the shared Tokio runtime.
 
-use std::time::{Duration, Instant};
+#[path = "discord_ipc.rs"]
+mod ipc;
+pub use ipc::{Connection, Discord, application_id};
 
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use discord_rich_presence::activity::{Activity, ActivityType, Assets, Button, StatusDisplayType, Timestamps};
-use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use serde::{Deserialize, Serialize};
 
-/// Application ID from the Discord Developer Portal. Its name is what Discord shows
-/// as "Listening to <name>" in the profile card.
-const CLIENT_ID: &str = "1521756469433991299";
-
-/// That application's name, unless the listener gives another.
+/// Fallback application name for the preview.
 pub const APP_NAME: &str = "Youtube Music";
 
 /// ytm-rs's icon, from its website: the example song's artwork in Settings' preview.
 pub const ICON: &str = "https://grapedjuice.github.io/ytm-rs/icon-192.png";
-
-const RETRY: Duration = Duration::from_secs(15);
 
 /// What a line of the card shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +136,7 @@ impl Page {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
+    pub application_id: String,
     pub when_paused: bool,
     pub hide_details: bool,
     /// Replaces [`APP_NAME`]; empty keeps it.
@@ -165,6 +157,7 @@ pub struct Prefs {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
+            application_id: String::new(),
             when_paused: false,
             hide_details: false,
             app_name: String::new(),
@@ -351,89 +344,6 @@ impl Card {
             Some(l) => format!("{} - {}", self.status_text(), l.text),
             None => self.status_text().to_owned(),
         }
-    }
-}
-
-pub struct Discord {
-    tx: Sender<Option<Card>>,
-}
-
-impl Discord {
-    pub fn spawn() -> Option<Self> {
-        let id = std::env::var("YTM_DISCORD_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| CLIENT_ID.to_owned());
-        let (tx, rx) = crossbeam_channel::unbounded();
-        std::thread::Builder::new().name("discord".into()).spawn(move || run(&id, rx)).ok()?;
-        Some(Self { tx })
-    }
-
-    /// `None` clears the status (paused / stopped).
-    pub fn set(&self, card: Option<Card>) {
-        let _ = self.tx.send(card);
-    }
-}
-
-fn run(id: &str, rx: Receiver<Option<Card>>) {
-    let mut client: Option<DiscordIpcClient> = None;
-    let mut want: Option<Card> = None;
-    let mut dirty = false;
-    let mut next_try = Instant::now();
-    loop {
-        match rx.recv_timeout(RETRY) {
-            Ok(p) => {
-                // Let a burst (skip, skip, seek) settle, then send only the last state.
-                std::thread::sleep(Duration::from_millis(400));
-                want = rx.try_iter().last().unwrap_or(p);
-                dirty = true;
-            }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-        if !dirty {
-            continue;
-        }
-        if client.is_none() {
-            if Instant::now() < next_try {
-                continue;
-            }
-            let mut c = DiscordIpcClient::new(id);
-            match c.connect() {
-                Ok(()) => {
-                    log::info!("discord: connected");
-                    client = Some(c);
-                }
-                Err(_) => {
-                    next_try = Instant::now() + RETRY;
-                    continue;
-                }
-            }
-        }
-        let c = client.as_mut().expect("connected above");
-        let res = match &want {
-            Some(card) => c.set_activity(activity(card)),
-            None => c.clear_activity(),
-        };
-        // Read Discord's reply: it reports rejected payloads there, and leaving
-        // replies unread would fill the pipe over a long session.
-        let res = res.and_then(|()| c.recv());
-        match res {
-            Ok((_, reply)) => {
-                if reply["evt"] == "ERROR" {
-                    log::warn!("discord rejected activity: {}", reply["data"]);
-                } else {
-                    log::debug!("discord: activity set: {}", reply["data"]);
-                }
-                dirty = false;
-            }
-            Err(e) => {
-                log::warn!("discord: {e}; reconnecting");
-                let _ = c.close();
-                client = None;
-                next_try = Instant::now() + RETRY;
-            }
-        }
-    }
-    if let Some(mut c) = client {
-        let _ = c.close();
     }
 }
 

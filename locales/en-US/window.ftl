@@ -50,3 +50,6 @@ palette-actions = Actions
 palette-title = Command palette
 palette-search = Search pages, settings, playlists and actions
 palette-search-for = Search for “{ $query }”
+settings-autostart = Start with Windows
+settings-autostart-desc = Open the player automatically when you sign in to Windows.
+settings-autostart-error = Could not change the Windows startup setting.

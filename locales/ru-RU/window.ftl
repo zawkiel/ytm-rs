@@ -49,3 +49,6 @@ palette-actions = Действия
 palette-title = Палитра команд
 palette-search = Поиск страниц, настроек, плейлистов и действий
 palette-search-for = Искать «{ $query }»
+settings-autostart = Запускать вместе с Windows
+settings-autostart-desc = Открывать плеер при входе в Windows.
+settings-autostart-error = Не удалось изменить настройку автозапуска Windows.

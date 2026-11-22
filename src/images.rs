@@ -21,6 +21,10 @@ const DISK_MAX_FILE: usize = 256 * 1024;
 const DISK_BUDGET: u64 = 64 * 1024 * 1024;
 /// A page full of covers doesn't ask for them all at once.
 const MAX_DOWNLOADS: usize = 8;
+/// Active downloads plus pictures waiting their turn.
+const MAX_PENDING: usize = 32;
+/// Reject oversized responses before buffering or decoding them.
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// Downloaded pictures not made into textures yet, kept in memory.
 const BYTES_BUDGET: usize = 32 * 1024 * 1024;
 
@@ -124,6 +128,10 @@ impl BytesLoader for HttpImages {
             Some(Entry::Failed(e, at)) if at.elapsed() < RETRY_AFTER => return Err(LoadError::Loading(e.clone())),
             Some(Entry::Failed(..)) | None => {}
         }
+        if cache.values().filter(|entry| matches!(entry, Entry::Pending)).take(MAX_PENDING).count() == MAX_PENDING {
+            // Each finished download wakes the UI, so visible pictures get another turn.
+            return Ok(BytesPoll::Pending { size: None });
+        }
         cache.insert(uri.to_owned(), Entry::Pending);
         drop(cache);
 
@@ -132,6 +140,7 @@ impl BytesLoader for HttpImages {
         let turns = self.turns.clone();
         let file = disk_path(&self.dir, &uri);
         self.backend.spawn(async move {
+            let _turn = turns.acquire().await;
             if let Ok(bytes) = std::fs::read(&file) {
                 // Touch it, so trimming drops pictures that aren't used any more.
                 let _ = std::fs::File::options().write(true).open(&file).and_then(|f| f.set_modified(std::time::SystemTime::now()));
@@ -140,14 +149,19 @@ impl BytesLoader for HttpImages {
                 return;
             }
             let res = async {
-                let _turn = turns.acquire().await;
-                let resp = http.get(&uri).send().await?.error_for_status()?;
+                let mut resp = http.get(&uri).send().await?.error_for_status()?;
+                anyhow::ensure!(resp.content_length().unwrap_or(0) <= MAX_RESPONSE_BYTES as u64, "image response exceeds the size limit");
                 let mime = resp
                     .headers()
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .map(str::to_owned);
-                Ok::<_, reqwest::Error>((resp.bytes().await?, mime))
+                let mut bytes = Vec::new();
+                while let Some(chunk) = resp.chunk().await? {
+                    anyhow::ensure!(chunk.len() <= MAX_RESPONSE_BYTES - bytes.len(), "image response exceeds the size limit");
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok::<_, anyhow::Error>((bytes, mime))
             }
             .await;
             let entry = match res {
@@ -155,7 +169,7 @@ impl BytesLoader for HttpImages {
                     if bytes.len() <= DISK_MAX_FILE {
                         let _ = std::fs::write(&file, &bytes);
                     }
-                    Entry::Ready(Arc::from(&bytes[..]), mime)
+                    Entry::Ready(Arc::from(bytes), mime)
                 }
                 Err(e) => Entry::Failed(e.to_string(), Instant::now()),
             };

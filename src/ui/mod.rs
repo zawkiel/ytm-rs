@@ -401,6 +401,7 @@ pub struct App {
     discord_enabled: bool,
     /// Last state sent to Discord, to send only real changes.
     discord_sent: Option<crate::discord::Card>,
+    discord_seek_revision: u64,
     /// How the card looks: Settings › Connections › Discord.
     discord_prefs: crate::discord::Prefs,
     /// Artists' pictures for the card's badge, by artist id; `None` while asked or when
@@ -734,6 +735,9 @@ pub struct App {
     updater: Option<crate::update::Updater>,
     /// The cache Settings › Storage measures and clears.
     storage: crate::cache::Storage,
+    preferences: crate::preferences::Preferences,
+    #[cfg(windows)]
+    autostart: bool,
     auto_update: bool,
     /// Updates from the nightly channel rather than stable.
     update_nightly: bool,
@@ -825,9 +829,10 @@ impl App {
         media: Option<Media>,
         bg: Option<Background>,
         storage: Option<&dyn eframe::Storage>,
-        language: Option<String>,
+        preferences: crate::preferences::Preferences,
     ) -> Self {
-        let get = |k: &str| storage.and_then(|s| s.get_string(k));
+        let get = |k: &str| preferences.get(k, storage);
+        let language = get("language").filter(|l| !l.is_empty());
         // Dev hook: YTM_FONT=<font name> tries a font without saving it.
         theme::set_font_choice(&dev_var("YTM_FONT").map(str::to_owned).or_else(|| get("font")).unwrap_or_default());
         let discord_enabled = get("discord_enabled").is_none_or(|v| v == "1");
@@ -882,9 +887,10 @@ impl App {
             ch,
             media,
             awake: crate::awake::Awake::spawn(),
-            discord: discord_enabled.then(crate::discord::Discord::spawn).flatten(),
+            discord: None,
             discord_enabled,
             discord_sent: None,
+            discord_seek_revision: 0,
             discord_prefs: get("discord").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
             artist_pics: HashMap::new(),
             remote: crate::remote::Remote::new(),
@@ -1000,7 +1006,13 @@ impl App {
             language,
             updater: None,
             storage: Default::default(),
-            auto_update: get("auto_update").is_none_or(|v| v == "1"),
+            preferences: Default::default(),
+            #[cfg(windows)]
+            autostart: crate::autostart::enabled().unwrap_or_else(|e| {
+                log::warn!("reading Windows startup setting: {e}");
+                false
+            }),
+            auto_update: get("auto_update").map_or(!cfg!(windows), |v| v == "1"),
             // A nightly build stays on nightlies until told otherwise. In a Flatpak,
             // Flatpak picks the version, so it's whichever this build is.
             update_nightly: get("update_channel")
@@ -1060,7 +1072,7 @@ impl App {
             appearance: theme::Appearance::from_key(&dev_var("YTM_APPEARANCE").map(str::to_owned).or_else(|| get("appearance")).unwrap_or_default()),
             accent_source: AccentSource::from_key(&get("custom_accent").unwrap_or_default()),
             accent_controls: get("accent_controls").is_some_and(|v| v == "1"),
-            anim_bg: get("anim_bg").is_none_or(|v| v == "1"),
+            anim_bg: get("anim_bg").map_or(!cfg!(windows), |v| v == "1"),
             bg_speed: shell::load_factor(get("bg_speed"), shell::BG_SPEED),
             bg_brightness: shell::load_factor(get("bg_brightness"), shell::BG_BRIGHTNESS),
             glass_on: get("glass_on").is_none_or(|v| v == "1"),
@@ -1237,6 +1249,7 @@ impl App {
         app.audio.set_pause_fade(app.pause_fade);
         app.set_eq();
         app.audio.set_stereo(app.stereo);
+        app.preferences = preferences;
         app
     }
 
@@ -1255,6 +1268,7 @@ impl App {
             return;
         }
         let prev = std::mem::replace(&mut self.page, page);
+        self.backend.cancel_searches();
         self.back.push(prev);
         self.forward.clear();
         self.page_loaded();
@@ -1267,6 +1281,7 @@ impl App {
         } else if self.np_open {
             self.np_open = false;
         } else if let Some(p) = self.back.pop() {
+            self.backend.cancel_searches();
             self.forward.push(std::mem::replace(&mut self.page, p));
             self.page_loaded();
         }
@@ -1274,6 +1289,7 @@ impl App {
 
     fn nav_forward(&mut self) {
         if let Some(p) = self.forward.pop() {
+            self.backend.cancel_searches();
             self.back.push(std::mem::replace(&mut self.page, p));
             self.page_loaded();
         }
@@ -2072,7 +2088,9 @@ impl eframe::App for App {
         false
     }
 
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+    fn save(&mut self, window: &mut dyn eframe::Storage) {
+        let mut preferences = std::mem::take(&mut self.preferences);
+        let storage: &mut dyn eframe::Storage = &mut preferences.edit(window);
         // Where eframe reads it back from, before it sizes the window: the saved size is
         // in points at this zoom. Everything else in egui's memory starts fresh.
         storage.set_string("egui", format!("(options:(zoom_factor:{:?}))", self.zoom));
@@ -2202,9 +2220,14 @@ impl eframe::App for App {
         if let Some(s) = self.session_json().filter(|_| !test_run) {
             storage.set_string(SESSION_KEY, s);
         }
+        storage.flush();
+        self.preferences = preferences;
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        if let Some(presence) = self.discord.take() {
+            presence.close();
+        }
         self.settle_now();
         if let (Some(bg), Some(gl)) = (&self.bg, gl) {
             bg.destroy(gl);

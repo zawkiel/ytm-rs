@@ -67,6 +67,8 @@ fn now_ms() -> u64 {
 #[derive(Default)]
 pub struct AudioStatus {
     pub position_ms: AtomicU64,
+    /// Incremented after the engine has put a seek into effect.
+    pub seek_revision: AtomicU64,
     /// When `position_ms` was sampled (ms since EPOCH), for smooth extrapolation.
     sampled_at: AtomicU64,
     pub duration_ms: AtomicU64,
@@ -142,7 +144,11 @@ impl AudioStatus {
     /// Whether the song asked for as `generation` is playing, not the one before it still
     /// going until the engine gets to the new one.
     pub fn started(&self, generation: u64) -> bool {
-        self.started_gen.load(Ordering::Acquire) == generation && self.playing.load(Ordering::Relaxed)
+        self.has_track(generation) && self.playing.load(Ordering::Relaxed)
+    }
+
+    pub fn has_track(&self, generation: u64) -> bool {
+        generation != 0 && self.started_gen.load(Ordering::Acquire) == generation
     }
 
     /// The length the song asked for as `generation` has by its stream, once started.
@@ -954,6 +960,7 @@ fn run(
                 }
                 // Paused, nothing else tells the UI (and the system media controls) where it is now.
                 status.set_position(at.as_millis() as u64);
+                status.seek_revision.fetch_add(1, Ordering::Release);
                 wake();
             }
             Ok(AudioCmd::Pause) => {
@@ -1003,6 +1010,7 @@ fn run(
                 fading.push(Fading { player: old, shared: shared.take(), out: fade_out.clone(), waiting: Some((Instant::now(), left)) });
                 current = 0;
                 prepared_seek = Prepared::default();
+                status.started_gen.store(0, Ordering::Release);
                 status.playing.store(false, Ordering::Relaxed);
                 status.set_position(0);
             }
@@ -1033,6 +1041,7 @@ fn run(
                 if let Some(old) = shared.take() {
                     old.cancel();
                 }
+                status.started_gen.store(0, Ordering::Release);
                 status.playing.store(false, Ordering::Relaxed);
                 status.set_position(0);
             }
@@ -1062,6 +1071,7 @@ fn run(
                 if in_place && output.sink.is_some() && player.try_seek(pos).is_ok() {
                     log::debug!("audio: seek to {pos:?} in place");
                     status.set_position(pos.as_millis() as u64);
+                    status.seek_revision.fetch_add(1, Ordering::Release);
                     wake();
                     continue;
                 }
@@ -1212,10 +1222,11 @@ fn run(
                     Some(failure) => AudioEvent::Interrupted { generation: current, at: song_pos(&song_ms), failure },
                     None => AudioEvent::Finished { generation: current },
                 };
-                let _ = events.send(event);
                 current = 0;
                 shared = None;
+                status.started_gen.store(0, Ordering::Release);
                 status.playing.store(false, Ordering::Relaxed);
+                let _ = events.send(event);
                 wake();
             }
         }

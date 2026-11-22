@@ -1,0 +1,48 @@
+name: Windows client
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows11-client]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --locked --all-targets
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --locked --release
+      - name: Package portable build and corresponding source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist, dist/portable | Out-Null
+          Copy-Item target/release/ytm-rs.exe, installer/portable.txt, README-WINDOWS.md, LICENSE dist/portable
+          Compress-Archive -Path dist/portable/* -DestinationPath dist/ytm-rs-portable-windows-x64.zip
+          git archive --format=zip --output=dist/ytm-rs-windows-source.zip HEAD
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ytm-rs-windows-x64
+          path: |
+            dist/*.zip
+          if-no-files-found: error
+      - name: Build optional Inno Setup installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q installer\ytm-rs.iss
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ytm-rs-windows-x64-installer
+          path: installer/Output/*.exe
+          if-no-files-found: error

@@ -4,6 +4,8 @@
 #[macro_use]
 mod i18n;
 mod appicon;
+#[cfg(windows)]
+mod autostart;
 mod fullscreen;
 mod hls;
 mod proxy;
@@ -35,6 +37,7 @@ mod node;
 mod notify;
 mod opus;
 mod preset;
+mod preferences;
 mod remote;
 mod shader;
 mod sponsorblock;
@@ -179,7 +182,9 @@ fn main() -> eframe::Result {
         "ytm-rs",
         options,
         Box::new(|cc| {
-            let language = cc.storage.and_then(|storage| storage.get_string("language")).filter(|l| !l.is_empty());
+            let preferences = preferences::Preferences::load(&data_dir());
+            let get = |key: &str| preferences.get(key, cc.storage);
+            let language = get("language").filter(|l| !l.is_empty());
             // Set the locale before any background work can format its first message.
             i18n::init(language.as_deref());
 
@@ -210,20 +215,18 @@ fn main() -> eframe::Result {
                 deeplink::register_protocol();
             }
 
-            let volume = cc
-                .storage
-                .and_then(|s| s.get_string("volume"))
+            let volume = get("volume")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.8f32);
             // The slider is logarithmic unless turned off. A volume saved before that
             // existed was linear: move it to where it sounds the same.
-            let log_setting = cc.storage.and_then(|s| s.get_string("log_volume"));
+            let log_setting = get("log_volume");
             let log_volume = log_setting.as_deref().is_none_or(|v| v == "1");
             let volume = if log_setting.is_none() { volume.cbrt() } else { volume };
             // Dev hook: YTM_MUTE starts silent and never persists the volume.
             let volume = if std::env::var_os("YTM_MUTE").is_some() { 0.0 } else { volume };
 
-            let device = cc.storage.and_then(|s| s.get_string("output_device")).filter(|d| !d.is_empty());
+            let device = get("output_device").filter(|d| !d.is_empty());
 
             let (audio_tx, audio_rx) = unbounded();
             let audio = audio::spawn(volume, log_volume, device, audio_tx, wake);
@@ -292,7 +295,7 @@ fn main() -> eframe::Result {
                 media,
                 bg,
                 cc.storage,
-                language,
+                preferences,
             )))
         }),
     );
@@ -414,7 +417,10 @@ fn settle_window_system() {
     }
     let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
     let wayland = set("WAYLAND_DISPLAY") || std::env::var("XDG_SESSION_TYPE").is_ok_and(|v| v == "wayland");
-    let tray = close_to_tray_saved(&std::fs::read_to_string(data_dir().join("app.ron")).unwrap_or_default());
+    let tray = preferences::Preferences::load(&data_dir()).get("close_to_tray", None).map_or_else(
+        || close_to_tray_saved(&std::fs::read_to_string(data_dir().join("app.ron")).unwrap_or_default()),
+        |value| value == "1",
+    );
     let x11 = x11_for_tray(wayland, set("DISPLAY"), tray, set("YTM_WAYLAND"));
     if x11 {
         log::info!("window: X11 (XWayland), so Close to tray can hide the window and bring it back");
@@ -438,7 +444,8 @@ fn data_dir() -> std::path::PathBuf {
     if let Some(dir) = update::portable_dir() {
         return dir.join("data");
     }
-    directories::ProjectDirs::from("", "", "ytm-rs").expect("no home directory").data_dir().to_path_buf()
+    let profile = if cfg!(windows) { "ytm-rs-windows" } else { "ytm-rs" };
+    directories::ProjectDirs::from("", "", profile).expect("no home directory").data_dir().to_path_buf()
 }
 
 #[cfg(test)]

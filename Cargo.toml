@@ -64,6 +64,7 @@ sys-locale = "0.3.2"
 # nodejs.org's .zip (Windows) or .tar.xz (macOS, Linux).
 zip = { version = "9.8.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 tar = { version = "0.4.46", default-features = false }
+tempfile = "3.27.0"
 liblzma = { version = "0.4.9", features = ["static"] }
 
 [target.'cfg(windows)'.dependencies]

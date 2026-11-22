@@ -5,7 +5,7 @@
 ; ARM64: cargo build --release --target aarch64-pc-windows-msvc, then
 ;   iscc /DArm64 installer\ytm-rs.iss  ->  ytm-rs-setup-<version>-arm64.exe
 
-#define AppName "ytm-rs"
+#define AppName "ytm-rs Windows"
 ; A nightly build passes its own: iscc /DAppVersion=0.2.34-nightly.20261110
 #ifndef AppVersion
   #define AppVersion "0.3.4"
@@ -22,12 +22,12 @@
 #endif
 
 [Setup]
-AppId={{6E0B7C4A-2D1F-4C8E-9B3A-7F5D1E2A9C40}
+AppId={{BDBB7426-F717-4A03-93CB-D85A3E810CF4}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=grapedjuice
-AppPublisherURL=https://github.com/grapedjuice/ytm-rs
-AppSupportURL=https://github.com/grapedjuice/ytm-rs/issues
+AppPublisher=zawkiel
+AppPublisherURL=https://github.com/zawkiel/ytm-rs
+AppSupportURL=https://github.com/zawkiel/ytm-rs/issues
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -68,14 +68,14 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 [Registry]
 ; ytm-rs:// links (jam invites). HKA is HKCU for per-user installs, HKLM for all-users.
 ; The installed app also re-registers itself under HKCU on launch.
-Root: HKA; Subkey: "Software\Classes\ytm-rs"; ValueType: string; ValueName: ""; ValueData: "URL:ytm-rs Protocol"; Flags: uninsdeletekey
-Root: HKA; Subkey: "Software\Classes\ytm-rs"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
-Root: HKA; Subkey: "Software\Classes\ytm-rs\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"",0"
-Root: HKA; Subkey: "Software\Classes\ytm-rs\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\ytm-rs-windows"; ValueType: string; ValueName: ""; ValueData: "URL:ytm-rs Windows Protocol"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\ytm-rs-windows"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\ytm-rs-windows\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"",0"
+Root: HKA; Subkey: "Software\Classes\ytm-rs-windows\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
 
 [UninstallDelete]
 ; Installers downloaded by the in-app updater.
-Type: filesandordirs; Name: "{userappdata}\ytm-rs\data\updates"
+Type: filesandordirs; Name: "{userappdata}\ytm-rs-windows\data\updates"
 ; The app's own Start menu shortcut on an all-users install, for a custom app icon.
 Type: files; Name: "{userprograms}\{#AppName}\{#AppName}.lnk"
 Type: dirifempty; Name: "{userprograms}\{#AppName}"

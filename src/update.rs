@@ -44,10 +44,10 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 
-const LATEST: &str = "https://api.github.com/repos/grapedjuice/ytm-rs/releases/latest";
-const ALL_RELEASES: &str = "https://api.github.com/repos/grapedjuice/ytm-rs/releases";
-const BY_TAG: &str = "https://api.github.com/repos/grapedjuice/ytm-rs/releases/tags/v";
-pub const RELEASES: &str = "https://github.com/grapedjuice/ytm-rs/releases";
+const LATEST: &str = "https://api.github.com/repos/zawkiel/ytm-rs/releases/latest";
+const ALL_RELEASES: &str = "https://api.github.com/repos/zawkiel/ytm-rs/releases";
+const BY_TAG: &str = "https://api.github.com/repos/zawkiel/ytm-rs/releases/tags/v";
+pub const RELEASES: &str = "https://github.com/zawkiel/ytm-rs/releases";
 
 /// The first argument of the staged helper (see [`apply_main`]).
 const APPLY_FLAG: &str = "--apply-update";

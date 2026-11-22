@@ -8,7 +8,7 @@ use souvlaki::MediaControlEvent;
 use crate::audio::{AudioCmd, AudioEvent};
 use crate::backend::{PlaylistChange, Req, Resp};
 use crate::model::{ShelfKind, Target, Track};
-use crate::ytm::HomePage;
+use crate::ytm::{HomePage, Scope};
 
 use crate::remote::{Cmd, RepeatMode};
 
@@ -202,7 +202,7 @@ impl App {
                     c.url = clip;
                 }
             }
-            Resp::Search(r) => {
+            Resp::Search(r) if matches!(&self.page, Page::Search(q) if q == &r.query) => {
                 if self.smoke.as_ref() == Some(&r.query) {
                     self.smoke = None;
                     if !r.tracks.is_empty() {
@@ -210,9 +210,12 @@ impl App {
                         self.play_list(r.tracks.clone(), 0);
                     }
                 }
+                if self.scope_for(&r.query) == Scope::Everywhere {
+                    self.loading = false;
+                }
                 self.search = Some(r);
-                self.loading = false;
             }
+            Resp::Search(_) => {}
             // Kept while its search is the page shown.
             Resp::SearchIn(r) if self.page == Page::Search(r.query.clone()) => {
                 if self.scope_for(&r.query) == r.scope {

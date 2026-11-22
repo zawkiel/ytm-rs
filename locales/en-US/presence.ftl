@@ -1,5 +1,14 @@
 ### App interface.
 
+discord-client-id = Discord Application ID
+discord-client-id-desc = Copy the Application ID from your app in the Discord Developer Portal.
+discord-connection = Connection
+discord-connection-disabled = Disabled
+discord-connection-waiting = Waiting for Discord
+discord-connection-connected = Connected
+discord-connection-rejected = Discord rejected the request
+discord-connection-id = Enter a valid Application ID
+
 discord-show-song = Show the song you're playing on your Discord profile.
 discord-show-paused = Show when paused
 discord-show-paused-desc = Keep the card visible while paused. The timer is hidden in Discord until playback resumes.

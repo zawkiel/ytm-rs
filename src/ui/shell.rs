@@ -840,6 +840,7 @@ pub fn top_bar(app: &mut App, ui: &mut Ui) {
             icon_at(ui, x.center(), icon::X, 16.0, theme::lerp_color(theme::text_dim(), theme::text(), h));
             if resp.clicked() {
                 app.search_text.clear();
+                app.backend.cancel_suggestions();
                 app.suggestions = Default::default();
                 app.suggest_sel = None;
                 app.suggest_due = Some(ui.input(|i| i.time));
@@ -850,6 +851,7 @@ pub fn top_bar(app: &mut App, ui: &mut Ui) {
             edit.request_focus();
         }
         if edit.changed() {
+            app.backend.cancel_suggestions();
             app.suggest_sel = None;
             let now = ui.input(|i| i.time);
             app.suggest_due = Some(now + 0.22);

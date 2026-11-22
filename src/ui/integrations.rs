@@ -9,27 +9,16 @@ use crate::backend;
 use super::{App, dev_var, notes, updatable};
 
 impl App {
-    pub(super) fn set_discord_enabled(&mut self, enabled: bool) {
-        self.discord_enabled = enabled;
-        if enabled {
-            if self.discord.is_none() {
-                self.discord = crate::discord::Discord::spawn();
-            }
-        } else {
-            if let Some(discord) = self.discord.take() {
-                discord.set(None);
-            }
-            self.discord_sent = None;
-        }
-    }
-
     /// What's playing, as Discord would get it, paused or not.
     pub(super) fn discord_presence(&self) -> Option<crate::discord::Presence> {
+        if self.ended || self.resume_at.is_some() {
+            return None;
+        }
         let t = self.playing_track()?;
         let now = crate::unix_ms() as i64;
         // In real time: a song at 2x is over in half its length.
         let speed = self.audio.status.speed() as f64;
-        let start_ms = now - (self.audio.status.position().as_millis() as f64 / speed) as i64;
+        let start_ms = now - (self.audio.status.position_smooth().as_millis() as f64 / speed) as i64;
         let dur = (self.audio.status.duration_ms.load(Ordering::Relaxed) as f64 / speed) as i64;
         Some(crate::discord::Presence {
             video_id: t.id.clone(),
@@ -52,6 +41,21 @@ impl App {
     /// Mirror playback into Discord. Cheap enough to run every frame: it only sends when
     /// the card would look different, as on a new song, play/pause, a seek or new settings.
     pub(super) fn sync_discord(&mut self, ctx: &egui::Context) {
+        let id = if !self.discord_enabled {
+            None
+        } else if ctx.memory(|m| m.has_focus(super::presence::application_id_field())) {
+            self.discord.as_ref().map(|d| d.id.as_str())
+        } else {
+            self.discord_application_id()
+        };
+        if id != self.discord.as_ref().map(|d| d.id.as_str()) {
+            let id = id.map(str::to_owned);
+            if let Some(old) = self.discord.take() {
+                old.set(None);
+            }
+            self.discord = id.map(|id| crate::discord::Discord::spawn(id, &self.backend, ctx));
+            self.discord_sent = None;
+        }
         if self.discord.is_none() {
             return;
         }
@@ -69,15 +73,26 @@ impl App {
         } else {
             prefs
         };
-        let want = self.discord_presence().filter(|p| !p.paused || prefs.when_paused).map(|p| crate::discord::Card::new(&p, prefs));
+        let want = self.discord_presence()
+            .filter(|p| self.audio.status.has_track(self.generation) && (!p.paused || prefs.when_paused))
+            .map(|p| crate::discord::Card::new(&p, prefs));
         let same = match (&want, &self.discord_sent) {
             (Some(a), Some(b)) => a.same(b),
             (a, b) => a.is_none() && b.is_none(),
         };
-        if !same {
+        let revision = self.audio.status.seek_revision.load(Ordering::Acquire);
+        let seeked = self.discord_seek_revision != revision;
+        self.discord_seek_revision = revision;
+        if !same || (seeked && want.as_ref().is_some_and(|c| c.times.is_some())) {
             d.set(want.clone());
             self.discord_sent = want;
         }
+    }
+
+    pub(super) fn discord_application_id(&self) -> Option<&str> {
+        let saved = self.discord_prefs.application_id.trim();
+        let id = if saved.is_empty() { configured_discord_id() } else { saved };
+        crate::discord::application_id(id)
     }
 
     /// Look up the playing artist's picture once, when the card's badge shows it.
@@ -533,6 +548,13 @@ impl App {
             }
         });
     }
+}
+
+fn configured_discord_id() -> &'static str {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        std::env::var("YTM_DISCORD_ID").unwrap_or_else(|_| option_env!("YTM_DISCORD_ID").unwrap_or_default().to_owned())
+    })
 }
 
 /// "Title – Artist" for a song, the app's name without one.

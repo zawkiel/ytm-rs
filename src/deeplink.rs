@@ -25,7 +25,7 @@ pub fn parse(arg: &str) -> Option<String> {
     let arg = arg.trim().trim_matches('"');
     let (scheme, rest) = arg.split_once("://")?;
     let rest = rest.split('#').next().unwrap_or("");
-    if scheme.eq_ignore_ascii_case("ytm-rs") {
+    if scheme.eq_ignore_ascii_case("ytm-rs") || scheme.eq_ignore_ascii_case("ytm-rs-windows") {
         // `jam/CODE`, `jam/CODE/`, or `jam/?c=CODE`.
         let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
         let path = path.trim_end_matches('/');
@@ -104,7 +104,7 @@ fn pipe_name() -> String {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect();
-    format!(r"\\.\pipe\ytm-rs-jam-{user}{}", profile_suffix())
+    format!(r"\\.\pipe\ytm-rs-windows-jam-{user}{}", profile_suffix())
 }
 
 /// Empty, or `-HASH` of a dev profile's `YTM_DATA_DIR`.
@@ -407,7 +407,7 @@ mod win {
     pub fn register_protocol() {
         match std::env::current_exe() {
             Ok(exe) => {
-                if let Err(e) = register_at(HKEY_CURRENT_USER, r"Software\Classes\ytm-rs", &exe.to_string_lossy()) {
+                if let Err(e) = register_at(HKEY_CURRENT_USER, r"Software\Classes\ytm-rs-windows", &exe.to_string_lossy()) {
                     log::warn!("registering the ytm-rs: protocol: {e}");
                 }
             }

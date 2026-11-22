@@ -1,5 +1,14 @@
 ### App interface.
 
+discord-client-id = Идентификатор приложения Discord
+discord-client-id-desc = Скопируйте Application ID своего приложения из Discord Developer Portal.
+discord-connection = Подключение
+discord-connection-disabled = Отключено
+discord-connection-waiting = Ожидание Discord
+discord-connection-connected = Подключено
+discord-connection-rejected = Discord отклонил запрос
+discord-connection-id = Введите корректный Application ID
+
 discord-show-song = Показывает текущий трек в вашем профиле Discord.
 discord-show-paused = Показывать на паузе
 discord-show-paused-desc = Карточка остаётся видимой на паузе. Таймер скрыт до возобновления.

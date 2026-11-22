@@ -4,7 +4,7 @@ use egui::{Align2, Color32, Id, Layout, Rect, RichText, Sense, Ui, UiBuilder, Ve
 
 use super::pages::{divider, dropdown_button, filtering, option_row, section_label, setting_row, setting_row_wide, settings_card, settings_section, toggle};
 use super::{App, widgets};
-use crate::discord::{self, BadgeShows, Card, Page, Prefs, Presence, Show, Status};
+use crate::discord::{self, BadgeShows, Card, Connection, Page, Prefs, Presence, Show, Status};
 use crate::theme::{self, icon};
 
 /// Dropdowns and the name box share a width, so the column lines up.
@@ -25,6 +25,30 @@ pub(super) fn settings(app: &mut App, ui: &mut Ui) {
         setting_row(ui, "Rich Presence", Some(crate::tr!("discord-show-song")), |ui| {
             toggle(ui, &mut enabled, "Rich Presence");
         });
+        divider(ui);
+        setting_row(ui, crate::tr!("discord-client-id"), Some(crate::tr!("discord-client-id-desc")), |ui| {
+            ui.add(egui::TextEdit::singleline(&mut prefs.application_id)
+                .id(application_id_field())
+                .char_limit(20)
+                .desired_width(CONTROL_W));
+        });
+        divider(ui);
+        let connection = if !enabled {
+            crate::tr!("discord-connection-disabled")
+        } else if let Some(worker) = &app.discord {
+            match worker.connection() {
+                Connection::Waiting => crate::tr!("discord-connection-waiting"),
+                Connection::Connected => crate::tr!("discord-connection-connected"),
+                Connection::Rejected => crate::tr!("discord-connection-rejected"),
+            }
+        } else if app.discord_application_id().is_some() {
+            crate::tr!("discord-connection-waiting")
+        } else {
+            crate::tr!("discord-connection-id")
+        };
+        setting_row(ui, crate::tr!("discord-connection"), None, |ui| {
+            ui.label(RichText::new(connection).font(theme::regular(13.0)).color(theme::text_dim()));
+        });
         reveal(ui, "discord-settings-top", shown, |ui| {
             divider(ui);
             setting_row(ui, crate::tr!("discord-show-paused"), Some(crate::tr!("discord-show-paused-desc")), |ui| {
@@ -36,20 +60,24 @@ pub(super) fn settings(app: &mut App, ui: &mut Ui) {
             });
         });
     });
-    if !filtering() && shown > 0.0 && prefs != Prefs::default() {
+    if !filtering() && shown > 0.0 && prefs != (Prefs { application_id: prefs.application_id.clone(), ..Prefs::default() }) {
         ui.scope(|ui| {
             ui.multiply_opacity(shown);
             if reset_link(ui, heading) {
-                prefs = Prefs::default();
+                prefs = Prefs { application_id: std::mem::take(&mut prefs.application_id), ..Prefs::default() };
             }
         });
     }
     reveal(ui, "discord-settings-rest", shown, |ui| rest(app, ui, &mut prefs));
-    if enabled != app.discord_enabled {
-        app.set_discord_enabled(enabled);
+    if enabled != app.discord_enabled || prefs != app.discord_prefs {
+        ui.ctx().request_repaint();
     }
-    // `sync_discord` sends what changed.
+    app.discord_enabled = enabled;
     app.discord_prefs = prefs;
+}
+
+pub(super) fn application_id_field() -> Id {
+    Id::unique("discord-client-id")
 }
 
 /// Everything under the Rich Presence switch's section, which shows only while it's on.

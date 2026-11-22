@@ -1506,6 +1506,7 @@ pub(super) enum SettingsTab {
     Lyrics,
     Appearance,
     Connections,
+    Discord,
     General,
     Shortcuts,
     About,
@@ -1513,7 +1514,7 @@ pub(super) enum SettingsTab {
 
 impl SettingsTab {
     /// Most used first, which is how they're listed.
-    pub(super) const ALL: [Self; 8] = [Self::Account, Self::Playback, Self::Lyrics, Self::Appearance, Self::Connections, Self::General, Self::Shortcuts, Self::About];
+    pub(super) const ALL: [Self; 9] = [Self::Account, Self::Playback, Self::Lyrics, Self::Appearance, Self::Connections, Self::Discord, Self::General, Self::Shortcuts, Self::About];
 
     pub(super) fn label(self) -> &'static str {
         match self {
@@ -1521,6 +1522,7 @@ impl SettingsTab {
             Self::Lyrics => tr!("settings-lyrics"),
             Self::Appearance => tr!("settings-appearance"),
             Self::Connections => tr!("settings-connections"),
+            Self::Discord => "Discord",
             Self::Account => tr!("settings-account"),
             Self::General => tr!("settings-general"),
             Self::Shortcuts => tr!("settings-keyboard-shortcuts"),
@@ -1704,10 +1706,8 @@ fn settings_tab(app: &mut App, ui: &mut Ui, tab: SettingsTab) {
             settings_app_icon(app, ui);
         }
         SettingsTab::Account => settings_account(app, ui),
-        SettingsTab::Connections => {
-            settings_connections(app, ui);
-            super::presence::settings(app, ui);
-        }
+        SettingsTab::Connections => settings_connections(app, ui),
+        SettingsTab::Discord => super::presence::settings(app, ui),
         SettingsTab::General => {
             settings_language(app, ui);
             settings_song_info(app, ui);
@@ -2605,6 +2605,23 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
         setting_row(ui, tr!("settings-close-to-tray"), Some(how), |ui| {
             toggle(ui, &mut app.close_to_tray, tr!("settings-close-to-tray"));
         });
+        #[cfg(windows)]
+        {
+            divider(ui);
+            let mut enabled = app.autostart;
+            setting_row(ui, tr!("settings-autostart"), Some(tr!("settings-autostart-desc")), |ui| {
+                toggle(ui, &mut enabled, tr!("settings-autostart"));
+            });
+            if enabled != app.autostart {
+                match crate::autostart::set_enabled(enabled) {
+                    Ok(()) => app.autostart = enabled,
+                    Err(e) => {
+                        log::warn!("saving Windows startup setting: {e}");
+                        app.toast(tr!("settings-autostart-error"));
+                    }
+                }
+            }
+        }
         if let Some(e) = &app.tray_error {
             ui.label(RichText::new(e).font(theme::regular(12.5)).color(theme::RED));
             ui.add_space(8.0);

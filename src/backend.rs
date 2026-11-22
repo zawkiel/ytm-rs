@@ -900,6 +900,7 @@ pub struct Backend {
     songs: Arc<std::sync::Mutex<std::collections::HashMap<String, SongCell>>>,
     /// Albums and playlists being downloaded.
     batch: Arc<std::sync::Mutex<DownloadQueue>>,
+    search_tasks: Arc<std::sync::Mutex<[Option<tokio::task::AbortHandle>; 3]>>,
 }
 
 impl Backend {
@@ -927,7 +928,7 @@ impl Backend {
         {
             log::warn!("proxy relay: {e:#}");
         }
-        let backend = Self { rt: Arc::new(rt), api, tx, audio, wake, prefetched: Default::default(), current: Default::default(), data_dir, lyrics, translate, jsc, premium: Arc::new(tokio::sync::Mutex::new(Err(None))), hq: Default::default(), backup_stream: Default::default(), clean: Default::default(), visionos_hls: Default::default(), songs: Default::default(), batch: Default::default() };
+        let backend = Self { rt: Arc::new(rt), api, tx, audio, wake, prefetched: Default::default(), current: Default::default(), data_dir, lyrics, translate, jsc, premium: Arc::new(tokio::sync::Mutex::new(Err(None))), hq: Default::default(), backup_stream: Default::default(), clean: Default::default(), visionos_hls: Default::default(), songs: Default::default(), batch: Default::default(), search_tasks: Default::default() };
         backend.keep_signed_in();
         Ok(backend)
     }
@@ -1032,8 +1033,27 @@ impl Backend {
         (self.wake)()
     }
 
+    pub fn cancel_searches(&self) {
+        for task in self.search_tasks.lock().unwrap().iter_mut().filter_map(Option::take) {
+            task.abort();
+        }
+    }
+
+    pub fn cancel_suggestions(&self) {
+        if let Some(task) = self.search_tasks.lock().unwrap()[2].take() {
+            task.abort();
+        }
+    }
+
     pub fn request(&self, req: Req) {
         let (what, quiet) = (req.name(), req.quiet());
+        // Keep the YouTube Music results and the account-scoped results independent.
+        let search_slot = match &req {
+            Req::Search(_) => Some(0),
+            Req::SearchIn { .. } => Some(1),
+            Req::Suggest { .. } => Some(2),
+            _ => None,
+        };
         let play_gen = match &req {
             Req::Play { generation, .. } => Some(*generation),
             _ => None,
@@ -1055,6 +1075,12 @@ impl Backend {
             log::debug!("{what}: done in {:?}", t0.elapsed());
             r
         });
+        let task_id = task.id();
+        if let Some(slot) = search_slot
+            && let Some(old) = self.search_tasks.lock().unwrap()[slot].replace(task.abort_handle())
+        {
+            old.abort();
+        }
         let this = self.clone();
         self.rt.spawn(async move {
             // A panic in a handler (or a library it calls) fails just this request,
@@ -1085,7 +1111,18 @@ impl Backend {
                 }
                 !stale
             });
-            if let Some(resp) = resp {
+            // The worker may have finished just before its replacement aborted it.
+            if let Some(slot) = search_slot {
+                let mut tasks = this.search_tasks.lock().unwrap();
+                if tasks[slot].as_ref().is_none_or(|task| task.id() != task_id) {
+                    return;
+                }
+                tasks[slot] = None;
+                if let Some(resp) = resp {
+                    let _ = this.tx.send(resp);
+                    this.wake();
+                }
+            } else if let Some(resp) = resp {
                 let _ = this.tx.send(resp);
                 this.wake();
             }

@@ -197,7 +197,7 @@ mod os {
     impl Default for Os {
         fn default() -> Self {
             let linked = crate::update::installed() && !cfg!(debug_assertions);
-            Self { launch: linked.then_some("ytm-rs://show") }
+            Self { launch: linked.then_some("ytm-rs-windows://show") }
         }
     }
 

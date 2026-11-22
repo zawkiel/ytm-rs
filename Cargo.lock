@@ -7846,6 +7846,7 @@ dependencies = [
  "sys-locale",
  "tao",
  "tar",
+ "tempfile",
  "tokio",
  "tokio-tungstenite",
  "tray-icon",
